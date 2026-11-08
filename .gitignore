@@ -1,0 +1,20 @@
+# Datos pesados y temporales
+*.parquet
+*.csv
+*.tsv
+*.json
+*.xlsx
+EXPORT_PARQUET/
+EXPORT_*/
+llegadas/
+checkpoints/
+*_schema/
+.checkpoint/
+
+# Entornos virtuales y configs
+venv/
+.venv/
+__pycache__/
+.vscode/
+.idea/
+.env
