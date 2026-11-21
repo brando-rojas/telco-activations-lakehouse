@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 06 · Capítulo 6: pipelines de producción (Lakeflow)
 # MAGIC
@@ -97,4 +101,4 @@
 # MAGIC 4. Con *Repair run*: solo corre las tareas que fallaron y las que dependen de ellas.
 # MAGIC 5. La historia: cada versión del registro con su vigencia (`__START_AT`, `__END_AT`). El tipo 1 sobrescribe y guarda solo lo último.
 # MAGIC </details>
-
+# MAGIC

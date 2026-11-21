@@ -59,11 +59,11 @@ GROUP BY ALL;
 -- COMMAND ----------
 
 -- TODO (E6.1): descomenta cuando exista silver.transiciones (E4.4)
--- CREATE OR REFRESH MATERIALIZED VIEW migraciones_por_mes
--- COMMENT 'Transiciones por mes, sentido y si es el mismo cliente'
--- AS SELECT date_trunc('month', inicio_ts) AS mes, transicion, mismo_cliente, count(*) AS n
--- FROM workspace.silver.transiciones
--- GROUP BY ALL;
+CREATE OR REFRESH MATERIALIZED VIEW migraciones_por_mes
+COMMENT 'Transiciones por mes, sentido y si es el mismo cliente'
+AS SELECT date_trunc('month', inicio_ts) AS mes, transicion, mismo_cliente, count(*) AS n
+FROM workspace.silver.transiciones
+GROUP BY ALL;
 
 -- COMMAND ----------
 
@@ -74,15 +74,24 @@ GROUP BY ALL;
 
 -- COMMAND ----------
 
--- CREATE OR REFRESH STREAMING TABLE status_pre_bronze
--- AS SELECT *, try_to_timestamp(DATE_CHANGE, 'yyyy-MM-dd HH:mm:ss') AS cambio_ts
--- FROM STREAM read_files('/Volumes/workspace/landing/raw/llegadas/status_pre/', format => 'parquet');
---
--- CREATE OR REFRESH STREAMING TABLE estado_linea_pre_scd2;
---
--- CREATE FLOW estado_linea_pre_flow AS AUTO CDC INTO estado_linea_pre_scd2
--- FROM STREAM(status_pre_bronze)
--- KEYS (SUB_ID)
--- SEQUENCE BY cambio_ts
--- COLUMNS SUB_ID, STATUS, cambio_ts
--- STORED AS SCD TYPE 2;
+-- CM_PRE.STATUS no tiene SUB_ID (lo vimos en E5.5): la llave es el número normalizado
+-- y el estado es NEW_STATUS. AUTO CDC no acepta SEQUENCE BY nulo: esas filas se botan antes.
+CREATE OR REFRESH STREAMING TABLE status_pre_bronze (
+  CONSTRAINT cambio_valido EXPECT (cambio_ts IS NOT NULL AND isdn9 IS NOT NULL) ON VIOLATION DROP ROW
+)
+COMMENT 'CM_PRE.STATUS tal como llega, con el numero normalizado y la fecha del cambio tipada'
+AS SELECT *,
+          nullif(CASE WHEN ISDN RLIKE '^[0-9 +-]+$' THEN right(regexp_replace(ISDN, '[^0-9]', ''), 9) ELSE ISDN END, '') AS isdn9,
+          try_to_timestamp(left(DATE_CHANGE, 19), 'yyyy-MM-dd HH:mm:ss') AS cambio_ts
+FROM STREAM read_files('/Volumes/workspace/landing/raw/llegadas/status_pre/', format => 'parquet');
+
+CREATE OR REFRESH STREAMING TABLE estado_linea_pre_scd2
+COMMENT 'Un periodo de estado por fila (SCD tipo 2) de cada numero prepago';
+
+CREATE FLOW estado_linea_pre_flow AS AUTO CDC INTO estado_linea_pre_scd2
+FROM STREAM(status_pre_bronze)
+KEYS (isdn9)
+SEQUENCE BY cambio_ts
+COLUMNS isdn9, OLD_STATUS, NEW_STATUS, cambio_ts
+STORED AS SCD TYPE 2
+TRACK HISTORY ON NEW_STATUS;  -- opcional: abre versión nueva solo si cambia el estado

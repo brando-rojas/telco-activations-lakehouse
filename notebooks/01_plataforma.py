@@ -1,4 +1,11 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# dependencies = [
+#   "tabulate",
+# ]
+# ///
 # MAGIC %md
 # MAGIC # 01 · Capítulo 1: la plataforma
 # MAGIC
@@ -38,25 +45,48 @@ display(carpetas)
 #       (tabla, archivos, gb) ordenado por gb descendente, y el total.
 # Pista: dbutils.fs.ls devuelve FileInfo(path, name, size, modificationTime)
 
+# E1.1 - tamaño por carpeta (tabla) y total
+filas = []
+for c in dbutils.fs.ls(RAW):
+  if not c.name.endswith('/'):  # en la raíz también hay CSV y el log: no son tablas
+      continue
+  pq = [f for f in dbutils.fs.ls(c.path) if f.name.endswith('.parquet')]
+  if pq:
+      filas.append((c.name, len(pq), sum([f.size for f in pq]) / 1024**3))
+
+tamanos = (spark.createDataFrame(filas, "tabla string, archivos int, gb double")
+           .orderBy(F.desc('gb')))
+display(tamanos)
+display(tamanos.agg(F.count('*').alias('tablas'),
+                    F.sum('archivos').alias('archivos'),
+                    F.round(F.sum('gb'), 2).alias('gb_total')))
+
 # COMMAND ----------
 
 # MAGIC %md
 # MAGIC ## E1.2 · Consultar archivos sin crear tablas
-# MAGIC Hay dos formas de leer Parquet directamente: `parquet.\`ruta\`` y `read_files(...)`.
+# MAGIC Hay dos formas de leer Parquet directamente: `parquet.\ruta\` y `read_files(...)`.
+# MAGIC
 # MAGIC **Tarea:** lee 10 filas de `CM_POS.SUB_MB` con cada una y compara: ¿qué columnas extra puedes pedir con `read_files`? (prueba `_metadata.file_path`).
+# MAGIC
 # MAGIC **Terminado cuando:** puedes decir qué archivo trae cada fila.
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT * FROM parquet.`/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_POS.SUB_MB/` LIMIT 10
+# MAGIC -- E1.2 • las dos lecturas directas, solo con los .parquet (la carpeta también tiene manifiesto.json)
+# MAGIC SELECT * FROM parquet.`/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_POS.SUB_MB/*.parquet` LIMIT 10;
 
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT _metadata.file_path AS archivo, *
-# MAGIC FROM read_files('/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_POS.SUB_MB/', format => 'parquet')
-# MAGIC LIMIT 10
+# MAGIC SELECT _metadata.file_path              AS archivo,
+# MAGIC        _metadata.file_size              AS bytes,
+# MAGIC        _metadata.file_modification_time AS modificado,
+# MAGIC        *
+# MAGIC FROM read_files('/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_POS.SUB_MB/*.parquet',
+# MAGIC                 format => 'parquet')
+# MAGIC LIMIT 10;
 
 # COMMAND ----------
 
@@ -74,6 +104,54 @@ dbutils.widgets.dropdown("tabla", "CM_PRE.SUB_MB", NUCLEO, "Tabla")
 
 # TODO: lee dbutils.widgets.get("tabla"), carga sus parquet con spark.read.parquet(...)
 #       y muestra df.printSchema() y df.count().
+tabla = dbutils.widgets.get("tabla")
+fs = archivos_parquet(tabla)
+if not fs:
+    print(f"{tabla}: no hay .parquet en {ruta(tabla)} (¿llega en la parte 2?)")
+else:
+    df = spark.read.parquet(*fs)
+    df.printSchema()
+    print(f"{tabla}: {df.count():,} filas en {len(fs)} archivos")
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ## Ejemplos de 5 magic commands
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC ### Tabla elegida en el widget: revisa el esquema abajo
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT current_catalog(), current_user()
+
+# COMMAND ----------
+
+# MAGIC %fs ls /Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_PRE.SUB_MB/
+
+# COMMAND ----------
+
+# MAGIC %pip install tabulate
+
+# COMMAND ----------
+
+# MAGIC %restart_python
+
+# COMMAND ----------
+
+from tabulate import tabulate
+print(tabulate(spark.table("bronze.cm_pos__ap_domain").limit(5).toPandas(), headers="keys")
+      if spark.catalog.tableExists("bronze.cm_pos__ap_domain")
+      else tabulate([["aún no hay bronze: se crea en el notebook 03"]]))
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Un widget también se lee desde SQL con un marcador de parámetro (DBR 15.2+ y serverless)
+# MAGIC SELECT :tabla AS tabla_elegida
 
 # COMMAND ----------
 
@@ -86,7 +164,7 @@ dbutils.widgets.dropdown("tabla", "CM_PRE.SUB_MB", NUCLEO, "Tabla")
 
 # MAGIC %sql
 # MAGIC SELECT STATUS, count(*) AS lineas
-# MAGIC FROM parquet.`/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_PRE.SUB_MB/`
+# MAGIC FROM parquet.`/Volumes/workspace/landing/raw/EXPORT_PARQUET/CM_PRE.SUB_MB/*.parquet`
 # MAGIC GROUP BY STATUS ORDER BY lineas DESC
 
 # COMMAND ----------
@@ -102,7 +180,7 @@ dbutils.widgets.dropdown("tabla", "CM_PRE.SUB_MB", NUCLEO, "Tabla")
 # MAGIC %md
 # MAGIC ## Preguntas tipo examen
 # MAGIC 1. Un equipo quiere que su cómputo no corra en su propia cuenta de nube. ¿Qué tipo de cómputo elige?
-# MAGIC 2. ¿Qué diferencia hay entre `parquet.\`ruta\`` y `read_files`? ¿Alguno de los dos es incremental?
+# MAGIC 2. ¿Qué diferencia hay entre `parquet.\ruta\` y `read_files`? ¿Alguno de los dos es incremental?
 # MAGIC 3. ¿Dónde guardarías archivos de llegada (CSV, Parquet) gobernados por Unity Catalog si no puedes usar `dbfs:/`?
 # MAGIC 4. Un notebook hace `%run ./config`. ¿Las variables de Python definidas en `config` quedan disponibles después? ¿Y con `dbutils.notebook.run`?
 # MAGIC
@@ -113,4 +191,4 @@ dbutils.widgets.dropdown("tabla", "CM_PRE.SUB_MB", NUCLEO, "Tabla")
 # MAGIC 3. En un volumen de Unity Catalog (`/Volumes/catalogo/esquema/volumen/...`).
 # MAGIC 4. Con `%run` sí (corre en el mismo contexto). `dbutils.notebook.run` corre otro notebook aparte y solo devuelve un texto con `dbutils.notebook.exit`.
 # MAGIC </details>
-
+# MAGIC
