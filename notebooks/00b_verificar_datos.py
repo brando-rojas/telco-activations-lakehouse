@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 00b · Verificar los datos antes de empezar
 # MAGIC
@@ -90,4 +94,12 @@ else:
 # MAGIC ### Para pensar (y para el examen)
 # MAGIC 1. ¿Por qué el chequeo se hace sobre una **muestra** y no sobre toda la tabla? ¿Qué riesgo acepta?
 # MAGIC 2. En Unity Catalog, ¿qué dos mecanismos te dejan mostrar una columna sensible solo a algunas personas sin duplicar la tabla? *(Lo practicas en el cap. 7: column masks y row filters.)*
+# MAGIC
 
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC •	**¿Por qué una muestra?** Porque revisar cada fila de 58 millones con cuatro expresiones regulares por columna cuesta cómputo (y en Free Edition la cuota es diaria). El riesgo que aceptas: un dato personal que solo aparece en filas fuera de la muestra (archivos viejos, valores raros) pasa sin ser visto. Lo bajas muestreando de varios archivos (no solo los últimos 3) o repitiendo la compuerta sobre la tabla completa una vez, antes de compartir algo.
+# MAGIC
+# MAGIC •	**Dos mecanismos para mostrar una columna sensible solo a algunos, sin duplicar la tabla:** column masks y row filters (cap. 7). La alternativa vieja es una vista dinámica, pero obliga a que todos consulten la vista y no la tabla.
+# MAGIC

@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 06 · Capítulo 6: pipelines de producción (Lakeflow)
 # MAGIC
@@ -39,6 +43,21 @@
 # MAGIC FROM event_log(TABLE(gold.audit_pre_silver))
 # MAGIC WHERE event_type = 'flow_progress' AND details:flow_progress:data_quality IS NOT NULL
 # MAGIC ORDER BY timestamp DESC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC WITH ev AS (
+# MAGIC   SELECT timestamp, origin.update_id AS update_id,
+# MAGIC          explode(from_json(details:flow_progress:data_quality:expectations,
+# MAGIC                  'array<struct<name:string, dataset:string, passed_records:bigint, failed_records:bigint>>')) AS e
+# MAGIC   FROM event_log(TABLE(gold.audit_pre_silver))
+# MAGIC   WHERE event_type = 'flow_progress' AND details:flow_progress:data_quality IS NOT NULL)
+# MAGIC SELECT update_id, min(timestamp) AS momento, e.dataset, e.name AS expectativa,
+# MAGIC        sum(e.passed_records) AS pasaron, sum(e.failed_records) AS fallaron
+# MAGIC FROM ev
+# MAGIC GROUP BY update_id, e.dataset, e.name
+# MAGIC ORDER BY momento DESC, expectativa;
 
 # COMMAND ----------
 
@@ -97,4 +116,4 @@
 # MAGIC 4. Con *Repair run*: solo corre las tareas que fallaron y las que dependen de ellas.
 # MAGIC 5. La historia: cada versión del registro con su vigencia (`__START_AT`, `__END_AT`). El tipo 1 sobrescribe y guarda solo lo último.
 # MAGIC </details>
-
+# MAGIC

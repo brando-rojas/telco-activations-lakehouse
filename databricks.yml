@@ -1,0 +1,52 @@
+# Configuracion de despliegue Databricks Asset Bundles 
+bundle:
+  name: telco_activations_lakehouse
+
+resources:
+  pipelines:
+    trazabilidad_bitel:
+      name: trazabilidad_bitel
+      catalog: workspace
+      schema: gold
+      serverless: true
+      continuous: false                          # modo Triggered
+      libraries:
+        - file:                                  # 06b es un archivo SQL, no un notebook
+            path: ./notebooks/06b_pipeline_trazabilidad.sql
+
+  jobs:
+    job_trazabilidad:
+      name: job_trazabilidad
+      performance_target: STANDARD               # = "Performance optimized: Off": gasta menos cuota
+      email_notifications:
+        on_failure: [brando.rojas@pucp.edu.pe]
+      schedule:
+        quartz_cron_expression: "0 0 6 * * ?"    # 6:00 a. m. todos los días
+        timezone_id: America/Lima
+        pause_status: PAUSED
+      tasks:
+        - task_key: llegada
+          notebook_task:
+            notebook_path: ./notebooks/06c_tarea_llegada.py
+            base_parameters: {dias: "3"}
+          max_retries: 1
+          min_retry_interval_millis: 60000       # 1 minuto entre intentos
+          disable_auto_optimization: true        # sin los reintentos extra automáticos de serverless
+        - task_key: pipeline
+          depends_on: [{task_key: llegada}]
+          pipeline_task:
+            pipeline_id: ${resources.pipelines.trazabilidad_bitel.id}
+        - task_key: control
+          depends_on: [{task_key: pipeline}]
+          notebook_task:
+            notebook_path: ./notebooks/06d_tarea_control.py
+            base_parameters: {umbral_descartes: "0.05"}
+          max_retries: 0                         # una falla de umbral no se arregla reintentando
+          disable_auto_optimization: true
+
+targets:
+  dev:
+    mode: development
+    default: true
+    workspace:
+      host: https://dbc-942fe594-cbd9.cloud.databricks.com

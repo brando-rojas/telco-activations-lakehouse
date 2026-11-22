@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 00 · Configuración común
 # MAGIC
@@ -118,9 +122,8 @@ def isdn9(columna):
     """Clave de número normalizada (expresión SQL).
     Si es un número en claro (solo dígitos, espacios, +, -) deja los últimos 9 dígitos
     (quita el 51). Si viene seudonimizado (hash), lo deja igual: el hash ya es la clave."""
-    return (f"CASE WHEN {columna} RLIKE '^[0-9 +-]+$' "
-            f"THEN right(regexp_replace({columna}, '[^0-9]', ''), 9) ELSE {columna} END")
+    return (f"nullif(CASE WHEN {columna} RLIKE '^[0-9 +-]+$' "
+        f"THEN right(regexp_replace({columna}, '[^0-9]', ''), 9) ELSE {columna} END, '')")
 
 
 print(f"Catálogo {CATALOGO} · raw {RAW} · logs: {DIAS_LOGS or 'todos'} días")
-

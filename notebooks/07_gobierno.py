@@ -1,4 +1,8 @@
 # Databricks notebook source
+# /// script
+# [tool.databricks.environment]
+# environment_version = "6"
+# ///
 # MAGIC %md
 # MAGIC # 07 · Capítulo 7: gobierno de datos con Unity Catalog
 # MAGIC
@@ -14,6 +18,15 @@
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC SELECT table_schema, count(*) AS columnas_con_comentario
+# MAGIC FROM workspace.information_schema.columns
+# MAGIC WHERE table_schema IN ('bronze', 'silver', 'gold') AND comment IS NOT NULL
+# MAGIC GROUP BY table_schema
+# MAGIC ORDER BY table_schema;
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## E7.1 · Etiquetar columnas personales
 # MAGIC **Tareas:**
@@ -24,8 +37,9 @@
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC ALTER TABLE silver.lineas ALTER COLUMN isdn9 SET TAGS ('pii' = 'telefono');
-# MAGIC -- TODO: cust_id y las etiquetas de la tabla
+# MAGIC ALTER TABLE silver.lineas ALTER COLUMN isdn9   SET TAGS ('pii' = 'telefono');
+# MAGIC ALTER TABLE silver.lineas ALTER COLUMN cust_id SET TAGS ('pii' = 'cliente');
+# MAGIC ALTER TABLE silver.lineas SET TAGS ('dominio' = 'lineas_moviles', 'clasificacion' = 'confidencial');
 
 # COMMAND ----------
 
@@ -48,14 +62,23 @@
 # COMMAND ----------
 
 # MAGIC %sql
+# MAGIC SELECT current_user();    -- debe decir brando.rojas@pucp.edu.pe; si dice otra cosa, usa eso abajo
+
+# COMMAND ----------
+
+# MAGIC %sql
 # MAGIC CREATE OR REPLACE FUNCTION gobierno.mascara_numero(x STRING)
 # MAGIC RETURNS STRING
-# MAGIC RETURN CASE WHEN current_user() = 'TU_CORREO@dominio.com' THEN x ELSE concat('*****', right(x, 4)) END;
+# MAGIC COMMENT 'Numero completo solo para el propietario; para los demas, los ultimos 4'
+# MAGIC RETURN CASE WHEN current_user() = 'brando.rojas@pucp.edu.pe' THEN x ELSE concat('*****', right(x, 4)) END;
 
 # COMMAND ----------
 
 # MAGIC %sql
 # MAGIC -- TODO: ALTER TABLE silver.lineas ALTER COLUMN isdn9 SET MASK gobierno.mascara_numero;
+# MAGIC ALTER TABLE silver.lineas ALTER COLUMN isdn9 SET MASK gobierno.mascara_numero;
+# MAGIC
+# MAGIC SELECT tipo, isdn9 FROM silver.lineas LIMIT 5;      -- tú: número completo
 
 # COMMAND ----------
 
@@ -68,6 +91,54 @@
 
 # MAGIC %sql
 # MAGIC -- TODO
+# MAGIC CREATE OR REPLACE FUNCTION gobierno.solo_prepago(tipo STRING)
+# MAGIC RETURNS BOOLEAN
+# MAGIC COMMENT 'El propietario ve todo; los demas solo prepago'
+# MAGIC RETURN current_user() = 'brando.rojas@pucp.edu.pe' OR tipo = 'PRE';
+# MAGIC
+# MAGIC ALTER TABLE silver.lineas SET ROW FILTER gobierno.solo_prepago ON (tipo);
+# MAGIC
+# MAGIC SELECT tipo, count(*) AS lineas FROM silver.lineas GROUP BY tipo;     -- tú: PRE y POS
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- Cambia el correo de las dos funciones por uno que no es el tuyo y mira qué ves.
+# MAGIC CREATE OR REPLACE FUNCTION gobierno.mascara_numero(x STRING)
+# MAGIC RETURNS STRING
+# MAGIC RETURN CASE WHEN current_user() = 'nadie@x.com' THEN x ELSE concat('*****', right(x, 4)) END;
+# MAGIC
+# MAGIC CREATE OR REPLACE FUNCTION gobierno.solo_prepago(tipo STRING)
+# MAGIC RETURNS BOOLEAN
+# MAGIC RETURN current_user() = 'nadie@x.com' OR tipo = 'PRE';
+# MAGIC
+# MAGIC SELECT tipo, isdn9 FROM silver.lineas LIMIT 5;                          -- ahora: *****1234
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT tipo, count(*) AS lineas FROM silver.lineas GROUP BY tipo;
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC -- 1) las funciones vuelven a tu correo
+# MAGIC CREATE OR REPLACE FUNCTION gobierno.mascara_numero(x STRING)
+# MAGIC RETURNS STRING
+# MAGIC COMMENT 'Numero completo solo para el propietario; para los demas, los ultimos 4'
+# MAGIC RETURN CASE WHEN current_user() = 'brando.rojas@pucp.edu.pe' THEN x ELSE concat('*****', right(x, 4)) END;
+# MAGIC
+# MAGIC CREATE OR REPLACE FUNCTION gobierno.solo_prepago(tipo STRING)
+# MAGIC RETURNS BOOLEAN
+# MAGIC COMMENT 'El propietario ve todo; los demas solo prepago'
+# MAGIC RETURN current_user() = 'brando.rojas@pucp.edu.pe' OR tipo = 'PRE';
+# MAGIC
+# MAGIC -- 2) se quitan de la tabla
+# MAGIC ALTER TABLE silver.lineas DROP ROW FILTER;
+# MAGIC ALTER TABLE silver.lineas ALTER COLUMN isdn9 DROP MASK;
+# MAGIC
+# MAGIC SELECT tipo, count(*) AS lineas FROM silver.lineas GROUP BY tipo;
 
 # COMMAND ----------
 
@@ -88,6 +159,15 @@
 
 # MAGIC %sql
 # MAGIC -- TODO: los GRANT para analistas_pmo (como práctica de sintaxis)
+# MAGIC GRANT USE SCHEMA ON SCHEMA workspace.gold TO `account users`;
+# MAGIC GRANT SELECT     ON SCHEMA workspace.gold TO `account users`;
+# MAGIC SHOW GRANTS ON SCHEMA workspace.gold;          -- ahora aparece account users con USE SCHEMA y SELECT
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC REVOKE SELECT     ON SCHEMA workspace.gold FROM `account users`;
+# MAGIC REVOKE USE SCHEMA ON SCHEMA workspace.gold FROM `account users`;
 
 # COMMAND ----------
 
@@ -109,11 +189,30 @@
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC -- linaje en varios saltos: de quién viene silver.lineas
+# MAGIC SELECT DISTINCT source_table_full_name, target_table_full_name
+# MAGIC FROM system.access.table_lineage
+# MAGIC WHERE target_table_full_name IN ('workspace.gold.bajas_por_mes', 'workspace.silver.lineas')
+# MAGIC   AND source_table_full_name IS NOT NULL;
+# MAGIC
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## E7.6 · Delta Sharing y Lakehouse Federation (teoría)
 # MAGIC Responde en `docs/decisiones.md`, pensando en telco:
 # MAGIC 1. Si OSIPTEL pidiera un extracto periódico de altas y bajas, ¿Delta Sharing sería una opción? ¿Qué compartirías (tabla, vista, columnas) y qué **no**?
 # MAGIC 2. Si quisieras consultar Oracle REPORT desde Databricks **sin copiar los datos**, ¿qué componente lo permite? ¿Qué limitaciones tendría frente a la exportación a Parquet que hiciste?
+
+# COMMAND ----------
+
+# MAGIC
+# MAGIC %md
+# MAGIC **Respuestas**
+# MAGIC - **OSIPTEL y Delta Sharing**: sí sería opción, con **open sharing** (el destinatario no necesita Databricks; recibe credenciales y lee con un cliente del protocolo abierto). Compartirías una vista o una tabla gold con solo lo pedido (altas y bajas por periodo, con el identificador que exija el requerimiento) y no las tablas bronze, ni columnas de cliente (documento, nombre, dirección), ni IDs internos que no se pidieron. Ojo: una tabla con row filter o column mask no se puede compartir por open sharing; por eso conviene una vista o tabla hecha para compartir.
+# MAGIC - **Consultar Oracle REPORT sin copiar**: Lakehouse Federation (una **connection** a Oracle y un **foreign catalog** en Unity Catalog). Limitaciones frente a tu export: cada consulta va a Oracle (carga sobre la base productiva y depende de que esté arriba), el cómputo serverless tiene que llegar por red a una IP interna de Bitel (10.x, que hoy no es alcanzable desde la nube sin conectividad privada), es de solo lectura, no tiene time travel ni las demás funciones de Delta, y el rendimiento depende de qué filtros se empujen a Oracle. El export a Parquet es una foto vieja pero propia, rápida y offline
+# MAGIC
 
 # COMMAND ----------
 
@@ -137,4 +236,4 @@
 # MAGIC 4. Delta Sharing abierto (protocolo abierto, no requiere Databricks del otro lado).
 # MAGIC 5. En las tablas de sistema de auditoría (`system.access.audit`).
 # MAGIC </details>
-
+# MAGIC
