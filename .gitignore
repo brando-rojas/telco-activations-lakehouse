@@ -10,6 +10,7 @@ llegadas/
 checkpoints/
 *_schema/
 .checkpoint/
+.databricks/
 
 # Entornos virtuales y configs
 venv/

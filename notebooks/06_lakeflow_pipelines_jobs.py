@@ -46,6 +46,21 @@
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC WITH ev AS (
+# MAGIC   SELECT timestamp, origin.update_id AS update_id,
+# MAGIC          explode(from_json(details:flow_progress:data_quality:expectations,
+# MAGIC                  'array<struct<name:string, dataset:string, passed_records:bigint, failed_records:bigint>>')) AS e
+# MAGIC   FROM event_log(TABLE(gold.audit_pre_silver))
+# MAGIC   WHERE event_type = 'flow_progress' AND details:flow_progress:data_quality IS NOT NULL)
+# MAGIC SELECT update_id, min(timestamp) AS momento, e.dataset, e.name AS expectativa,
+# MAGIC        sum(e.passed_records) AS pasaron, sum(e.failed_records) AS fallaron
+# MAGIC FROM ev
+# MAGIC GROUP BY update_id, e.dataset, e.name
+# MAGIC ORDER BY momento DESC, expectativa;
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## E6.3 · Cambiar la acción de una expectativa
 # MAGIC En `06b`, la expectativa `fecha_valida` tiene `ON VIOLATION DROP ROW`.
